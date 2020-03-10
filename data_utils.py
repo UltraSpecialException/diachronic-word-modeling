@@ -2,6 +2,7 @@ import os
 import requests
 import json
 from collections import defaultdict
+import re
 
 corpus1_path = "project/data/semeval2020_task1_eng/corpus1/lemma/ccoha1.txt"
 corpus2_path = "project/data/semeval2020_task1_eng/corpus2/lemma/ccoha2.txt"
@@ -11,6 +12,14 @@ paths = {
     1: os.path.join(os.path.abspath("."), corpus1_path),
     2: os.path.join(os.path.abspath("."), corpus2_path)
 }
+
+
+def save_json(path, data):
+    """
+    Save a json at the given path using the data.
+    """
+    with open(path, "w+") as data_file:
+        json.dump(data, data_file)
 
 
 def open_corpus(corpus_num, as_list=True):
@@ -33,6 +42,28 @@ def view_first_lines(corpus, num_lines):
 
     for line in corpus[:num_lines]:
         print(line)
+
+
+def get_target_sentences(corpus, save_path=None):
+    """
+    From the given corpus, extract sentences that contain the target words.
+    """
+    data = open_corpus(corpus)
+    word_to_sentence = defaultdict(list)
+    for line in data:
+        if "_nn" in line or "_vb" in line:
+            words = re.findall(r"([^\s]*_nn|[^\s]*_vb)", line)
+            line = re.sub(r"(_nn|_vb)", "", line)
+
+            for word in words:
+                if word[:-3].strip() != "xx":
+                    word_to_sentence[word[:-3].strip()].append(line.strip())
+
+    if save_path is not None:
+        print("Saving target sentences.")
+        save_json(save_path, word_to_sentence)
+
+    return word_to_sentence
 
 
 def retrieve_targets():
@@ -69,7 +100,7 @@ def retrieve_definitions(target_words, save_path=None):
         url = f"https://od-api.oxforddictionaries.com/api/v2/entries/en-us/" \
             f"{word}?fields=definitions&strictMatch=false"
         result = requests.get(url,
-                              headers = {"app_id": app_id, "app_key": app_key})
+                              headers={"app_id": app_id, "app_key": app_key})
 
         if str(result.status_code) != "200":
             raise RuntimeError(f"Error code {result.status_code} when getting "
@@ -162,3 +193,39 @@ def get_senses(lexical_entry):
                 senses_dict["subsenses"].append([])
 
     return senses_dict
+
+
+class DataCollection:
+    """
+    Organizes the data into batches for easier training.
+    """
+
+    def __init__(self, senses_inventory, data, batch_size):
+        """
+        Initializes the batch object.
+        """
+        self.senses_inventory = senses_inventory
+        self.data = data
+        self.batch_size = batch_size
+
+    def __iter__(self):
+        pass
+
+
+class DataIterator:
+    """
+    Iterator for class DataIterator.
+    """
+
+    def __init__(self, batches):
+        self.batches = batches
+        self.next_batch = 1
+
+    def __next__(self):
+        if self.next_batch > len(self.batches):
+            raise StopIteration
+
+        batch = self.batches[self.next_batch - 1]
+        self.next_batch += 1
+
+        return batch
