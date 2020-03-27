@@ -37,7 +37,7 @@ def handle_verbosity(model, tokenizer, pretrained, verbose):
 
 def get_bert_model_tokenizer(size="large", case="uncased", verbose=False):
     """
-    Return the loaded BERT model as specified by the parameters.
+    Return the loaded BERT model and tokenizer as specified by the parameters.
     """
     assert size in ["large", "base"] and case in ["cased", "uncased"], \
         "Size must be one of \"large\" or \"base\", case must be one of " \
@@ -51,9 +51,9 @@ def get_bert_model_tokenizer(size="large", case="uncased", verbose=False):
 
 def get_xlnet_model_tokenizer(size="large", verbose=False):
     """
-    Return the loaded XLNet model as specified by the parameters. Note that
-    you cannot specify the casing of the model here since only the cased models
-    are made available.
+    Return the loaded XLNet model and tokenizer as specified by the parameters.
+    Note that you cannot specify the casing of the model here since only the
+    cased models are made available.
     """
     assert size in ["large", "base"], \
         "Size must be one of \"large\" or \"base\""

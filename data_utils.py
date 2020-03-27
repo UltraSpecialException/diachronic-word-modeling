@@ -4,6 +4,7 @@ import json
 from collections import defaultdict
 import re
 
+
 corpus1_path = "project/data/semeval2020_task1_eng/corpus1/lemma/ccoha1.txt"
 corpus2_path = "project/data/semeval2020_task1_eng/corpus2/lemma/ccoha2.txt"
 target_path = "project/data/semeval2020_task1_eng/targets.txt"
@@ -20,6 +21,7 @@ def save_json(path, data):
     """
     with open(path, "w+") as data_file:
         json.dump(data, data_file)
+        data_file.close()
 
 
 def open_corpus(corpus_num, as_list=True):
@@ -193,39 +195,3 @@ def get_senses(lexical_entry):
                 senses_dict["subsenses"].append([])
 
     return senses_dict
-
-
-class DataCollection:
-    """
-    Organizes the data into batches for easier training.
-    """
-
-    def __init__(self, senses_inventory, data, batch_size):
-        """
-        Initializes the batch object.
-        """
-        self.senses_inventory = senses_inventory
-        self.data = data
-        self.batch_size = batch_size
-
-    def __iter__(self):
-        pass
-
-
-class DataIterator:
-    """
-    Iterator for class DataIterator.
-    """
-
-    def __init__(self, batches):
-        self.batches = batches
-        self.next_batch = 1
-
-    def __next__(self):
-        if self.next_batch > len(self.batches):
-            raise StopIteration
-
-        batch = self.batches[self.next_batch - 1]
-        self.next_batch += 1
-
-        return batch
