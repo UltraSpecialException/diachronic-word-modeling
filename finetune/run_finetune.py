@@ -13,11 +13,11 @@ from modules import *
 from keras.preprocessing.sequence import pad_sequences
 from tqdm import tqdm
 from transformers import BertForSequenceClassification, \
-    get_linear_schedule_with_warmup, AdamW
-from sklearn.model_selection import train_test_split
+    get_linear_schedule_with_warmup, AdamW,\
+    DistilBertForSequenceClassification, XLNetForSequenceClassification
 
 
-def tokenize_inputs(tokenizer, sentences):
+def tokenize_inputs(tokenizer, sentences, add_special_tokens=True):
     """
     Use the tokenizer given to tokenize the sentences into their IDs.
     """
@@ -25,25 +25,28 @@ def tokenize_inputs(tokenizer, sentences):
     tokenized_sentences = []
     progress = tqdm(total=len(sentences))
     for sentence in sentences:
-        tokenized_sentence = tokenizer.encode(sentence, add_special_tokens=True)
+        tokenized_sentence = tokenizer.encode(
+            sentence,
+            add_special_tokens=add_special_tokens
+        )
         tokenized_sentences.append(tokenized_sentence)
         progress.update(1)
 
     return tokenized_sentences
 
 
-def pad_inputs(padded_sentences, padding_token=0):
+def pad_inputs(tokenized_sentences, padding_token=0):
     """
     Return the padded sentences where each sentence is padded with 0's so that
     all sentences have the length of the longest sentence.
     """
-    max_len = max([len(sentence) for sentence in padded_sentences])
+    max_len = max([len(sentence) for sentence in tokenized_sentences])
 
-    return pad_sequences(padded_sentences, maxlen=max_len, dtype="long",
+    return pad_sequences(tokenized_sentences, maxlen=max_len, dtype="long",
                          value=padding_token, truncating="post", padding="post")
 
 
-def get_padding_mask(tokenized_sentences):
+def get_padding_mask(padded_sentences):
     """
     Return a list of masks, one for each tokenized sentence, where at each
     position of the sentence, if the token has a non-zero value, then the token
@@ -51,7 +54,7 @@ def get_padding_mask(tokenized_sentences):
     corresponding position in the mask, otherwise, the token is a padding token
     and will have value 0 in the corresponding position in the mask.
     """
-    return tokenized_sentences > 0
+    return padded_sentences > 0
 
 
 def get_train_val_loader(inputs, masks, labels, batch_size, train_split=0.8):
@@ -91,14 +94,16 @@ def get_train_val_loader(inputs, masks, labels, batch_size, train_split=0.8):
     return train_dataloader, val_dataloader
 
 
+name_to_activation = {
+        "relu": nn.ReLU,
+        "gelu": nn.GELU
+    }
+
+
 class BertWordSenseDisambiguation(BertForSequenceClassification):
     """
     Apply BERT for Word Sense Disambiguation task.
     """
-    __name_to_activation__ = {
-        "relu": nn.ReLU,
-        "gelu": nn.GELU
-    }
 
     def __init__(self, config):
         """
@@ -109,7 +114,7 @@ class BertWordSenseDisambiguation(BertForSequenceClassification):
 
     def reset_classifier(self, num_layers, activation):
         """
-        Reset the classifier to default iniitialization.
+        Reset the classifier to default initialization.
         """
         config = self.config_
         blocks = []
@@ -118,11 +123,73 @@ class BertWordSenseDisambiguation(BertForSequenceClassification):
             nn.init.xavier_uniform_(layer.weight)
             nn.init.constant_(layer.bias, 0)
             blocks.append(layer)
-            blocks.append(self.__name_to_activation__[activation]())
+            blocks.append(name_to_activation[activation]())
 
         self.classifier = nn.Sequential(
             *blocks,
             nn.Linear(config.hidden_size, self.config.num_labels)
+        )
+
+
+class DistilBertWordSenseDisambiguation(DistilBertForSequenceClassification):
+    """
+    Apply BERT for Word Sense Disambiguation task.
+    """
+
+    def __init__(self, config):
+        """
+        Initialize an instance of WSD BERT.
+        """
+        super(DistilBertWordSenseDisambiguation, self).__init__(config)
+        self.config_ = config
+
+    def reset_classifier(self, num_layers, activation):
+        """
+        Reset the classifier to default initialization.
+        """
+        config = self.config_
+        blocks = []
+        for _ in range(num_layers):
+            layer = nn.Linear(config.hidden_size, config.hidden_size)
+            nn.init.xavier_uniform_(layer.weight)
+            nn.init.constant_(layer.bias, 0)
+            blocks.append(layer)
+            blocks.append(name_to_activation[activation]())
+
+        self.classifier = nn.Sequential(
+            *blocks,
+            nn.Linear(config.hidden_size, self.config.num_labels)
+        )
+
+
+class XLNetWordSenseDisambiguation(XLNetForSequenceClassification):
+    """
+    Apply XLNet for Word Sense Disambiguation task.
+    """
+
+    def __init__(self, config):
+        """
+        Initialize an instance of WSD BERT.
+        """
+        super(XLNetWordSenseDisambiguation, self).__init__(config)
+        self.config_ = config
+
+    def reset_classifier(self, num_layers, activation):
+        """
+        Reset the classifier to default initialization.
+        """
+        config = self.config_
+        blocks = []
+        for _ in range(num_layers):
+            layer = nn.Linear(config.d_model, config.d_model)
+            nn.init.xavier_uniform_(layer.weight)
+            nn.init.constant_(layer.bias, 0)
+            blocks.append(layer)
+            blocks.append(name_to_activation[activation]())
+
+        self.logits_proj = nn.Sequential(
+            *blocks,
+            nn.Linear(config.d_model, self.config.num_labels)
         )
 
 
@@ -140,6 +207,7 @@ def check_path(path):
     )
     if not os.path.isdir(parent):
         raise FileNotFoundError(f"parent path {parent} not found")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WSD Finetuning scripts")
@@ -163,6 +231,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--bert_size",
                         help="Whether to use the base or large size of BERT",
+                        choices=["base", "large"],
+                        default="large",
+                        type=str)
+
+    parser.add_argument("--xlnet_size",
+                        help="Whether to use the base or large size of XLNet",
                         choices=["base", "large"],
                         default="large",
                         type=str)
@@ -229,13 +303,17 @@ if __name__ == "__main__":
             output_attentions=False,
             output_hidden_states=False
         )
-        model.reset_classifier(args.num_layers, args.activation)
     else:
         # handle XLNet
-        pretrained_model = None
-        model = None
-        pass
+        pretrained_model = f"xlnet-{args.xlnet_size}-cased"
+        model = XLNetWordSenseDisambiguation.from_pretrained(
+            pretrained_model,
+            num_labels=2,
+            output_attentions=False,
+            output_hidden_states=False
+        )
 
+    model.reset_classifier(args.num_layers, args.activation)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
@@ -259,22 +337,24 @@ if __name__ == "__main__":
         sentences.append(sentence)
         labels.append(int(label))
 
-    if args.model == "bert":
-        _, tokenizer = get_bert_model_tokenizer(args.bert_size, args.bert_case)
-    else:
-        # TODO: XLNET
-        raise NotImplementedError
-
     if args.padded_data_input is not None:
         print("Loading padded data...")
         padded_data = torch.load(args.padded_data_input, map_location="cpu")
         print("Data loaded...")
     else:
+        if args.model == "bert":
+            _, tokenizer = get_bert_model_tokenizer(args.bert_size,
+                                                    args.bert_case)
+        else:
+            _, tokenizer = get_xlnet_model_tokenizer(args.xlnet_size)
+
         tokenized_data = tokenize_inputs(tokenizer, sentences)
         padded_data = pad_inputs(tokenized_data, tokenizer.pad_token_id)
         padded_data = torch.tensor(padded_data)
-        torch.save(padded_data, args.padded_data_output)
+        if args.padded_data_output is not None:
+            torch.save(padded_data, args.padded_data_output)
 
+    # might want to transfer to GPU later so it doesn't crowd the GPU up
     padded_data = padded_data.to(device)
     labels = torch.tensor(labels).to(device)
     masks = get_padding_mask(padded_data).to(device)
@@ -290,7 +370,7 @@ if __name__ == "__main__":
     print("Setting up...")
     total_iterations = len(train_dataloader) * args.epochs
 
-    optimizer = AdamW(model.parameters())
+    optimizer = AdamW(model.parameters(), lr=2e-5)
     scheduler = get_linear_schedule_with_warmup(optimizer, 0, total_iterations)
 
     for epoch in range(args.epochs):

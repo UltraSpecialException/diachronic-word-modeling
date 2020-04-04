@@ -24,8 +24,9 @@ def extract_semcor(data_path, words_output_path, sentences_output_path):
             if line[1:].startswith("instance"):
                 words.extend(target_word)
                 id = re.findall("(?<=id=\").*(?=\" lemma)", line.strip())
-                word_and_id = (target_word[0], id[0])
-                current_words.append(word_and_id)
+                pos = re.findall("(?<=pos=\").*(?=\">)", line.strip())
+                word_and_info = (target_word[0], id[0], pos[0])
+                current_words.append(word_and_info)
 
             elif line[1:].startswith("/sentence"):
                 sentences_to_word[" ".join(sentence)] = current_words
@@ -35,11 +36,12 @@ def extract_semcor(data_path, words_output_path, sentences_output_path):
         words = list(set(words))
         data_file.close()
 
-    with open(words_output_path, "w+") as words_output_file:
-        for word in words:
-            words_output_file.write(f"{word}\n")
+    if words_output_path is not None:
+        with open(words_output_path, "w+") as words_output_file:
+            for word in words:
+                words_output_file.write(f"{word}\n")
 
-        words_output_file.close()
+            words_output_file.close()
 
     save_json(sentences_output_path, sentences_to_word)
 
@@ -139,6 +141,7 @@ def format_data(sentence_to_targets, senses_inventory, senses_id_to_meaning,
                             label = "1"
                             break
                     except KeyError:
+                        print(f"Word {lemma} has problems")
                         error_words.add(lemma)
                         continue
 
@@ -155,10 +158,48 @@ def format_data(sentence_to_targets, senses_inventory, senses_id_to_meaning,
     return lines
 
 
+def separate_target_words_sentences_by_senses(
+        sentence_to_targets, labeled_data,
+        senses_id_to_meaning, target_words, save_path=None):
+    """
+    Save a JSON that has a mapping of a word to all its *available* senses
+    and each sense of each word is mapped a list of sentences where the target
+    word in that sentence has the corresponding sense.
+    """
+    data = {}
+    for sentence in sentence_to_targets:
+        sentence_ = sentence.replace("&apos;", "'")
+        for lemma, lemma_id, pos in sentence_to_targets[sentence]:
+            lemma = lemma.replace("&apos;", "'")
+            if lemma not in target_words or pos != target_words[lemma]:
+                continue
+            print("Current lemma:", lemma, "POS:", pos)
+            if lemma not in data:
+                data[lemma] = defaultdict(list)
+
+            target_sense = labeled_data[lemma_id][0]
+            sense_meaning = senses_id_to_meaning[lemma][target_sense]
+            data[lemma][sense_meaning].append(sentence_)
+
+    if save_path is not None:
+        save_json(save_path, data)
+
+
 if __name__ == "__main__":
-    sentence_to_targets = json.load(open("../data/semcor_sentence_to_words.json"))
-    senses_inventory = json.load(open("../data/semcor_word_to_all_senses.json"))
-    senses_id_to_meaning = json.load(open("../data/semcor_key_to_sense.json"))
-    labeled_data = json.load(open('../data/semcor_lemma_id_to_labels.json'))
-    format_data(sentence_to_targets, senses_inventory, senses_id_to_meaning, labeled_data, "../data/semcor_training_data.txt")
+    sentence_to_targets = json.load(open("../unprocessed_data/essentials/semcoromsti_sentence_to_words_pos.json"))
+    senses_inventory = json.load(open("../unprocessed_data/essentials/semcor_word_to_all_senses.json"))
+    senses_id_to_meaning = json.load(open("../unprocessed_data/essentials/semcor_key_to_sense.json"))
+    labeled_data = json.load(open('../unprocessed_data/essentials/semcoromsti_lemma_id_to_labels.json'))
+    words = open("../unprocessed_data/semeval2020_task1_eng/targets.txt").readlines()
+    symbol_to_pos = {
+        "nn": "NOUN",
+        "vb": "VERB"
+    }
+    words = {word.split("_")[0]: symbol_to_pos[word.split("_")[1].strip()] for word in words}
+    print(words)
+    # format_data(sentence_to_targets, senses_inventory, senses_id_to_meaning, labeled_data, "../data/semcor_training_data.txt")
+    separate_target_words_sentences_by_senses(sentence_to_targets, labeled_data, senses_id_to_meaning, words, "../data/words_with_sentences_separated_by_senses_pos_big.json")
+    # data_path = "../unprocessed_data/WSD_Evaluation_Framework/Training_Corpora/SemCor+OMSTI/semcor+omsti.data.xml"
+    # extract_semcor(data_path, None, "../unprocessed_data/essentials/semcoromsti_sentence_to_words_pos.json")
+
 
